@@ -1,6 +1,8 @@
 # Using probabilistic forecasting to assess impacts of the Conservation Reserve Program on grassland birds
 
-Repository provided for review only. Because of the need to respect the sensitivity of lesser prairie-chicken lek locations (U.S. ESA-listed species), we've censored the preprocessing section of our code considerably. The following sections of our code can be examined and run using this repository:
+Code and data are provided for review only. Lesser prairie-chickens (*Tympanuchus pallidicinctus*) are a sensitive species which have a complicated relationship with the U.S. Endangered Species Act. In order to protect the locations of their leks, we have omitted some of the code used to preprocess lek locations and extract covariate values from this repository. 
+
+The code to run each of our analyses is included in the following folders:
 
 1) Generating CRP layers from NLCD, and summarizing changes in CRP enrollment over time (directory locations: ~/covariates/CRP and ~/changes_in_crp)
 
