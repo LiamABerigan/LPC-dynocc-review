@@ -1,0 +1,167 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(sf)
+library(stars)
+library(terra)
+library(mapview)
+library(furrr)
+library(tidybayes)
+library(ggpubr)
+library(tigris)
+plan(multisession, workers = 4)
+```
+
+# True CRP enrollment within/outside LPC range
+```{r}
+## Using the KDWP's southwest prairie-chicken section as the list of counties including LPC (same as all counties overlapping EOR)
+
+# first: area of these counties
+# county_shp <- st_read("/Users/liamberigan/Library/CloudStorage/OneDrive-KansasStateUniversity/KansasAnalysis/Anthropogenic_features/US_county_polygons_aea.shp") %>% 
+#   filter(STATEFP == 20)
+county_shp <- counties(state = "KS")
+
+area_within_range <- county_shp %>% 
+  filter(NAME %in% c("Sherman", "Thomas", "Sheridan", "Graham", "Rooks", "Wallace", "Logan", "Gove", "Trego", "Ellis", "Greeley", "Wichita", "Scott", "Lane", "Ness", "Rush", "Hamilton", "Kearney", "Finney", "Hodgeman", "Pawnee", "Edwards", "Stanton", "Grant", "Haskell", "Gray", "Ford", "Kiowa", "Pratt", "Stafford", "Morton", "Stevens", "Seward", "Meade", "Clark", "Comanche", "Barber")) %>% 
+  st_area() %>% 
+  sum() %>% 
+  as.numeric()
+area_within_range <- area_within_range*0.00024710538150000001 #converts to acres
+
+area_outside_range <- county_shp %>% 
+  filter(!(NAME %in% c("Sherman", "Thomas", "Sheridan", "Graham", "Rooks", "Wallace", "Logan", "Gove", "Trego", "Ellis", "Greeley", "Wichita", "Scott", "Lane", "Ness", "Rush", "Hamilton", "Kearney", "Finney", "Hodgeman", "Pawnee", "Edwards", "Stanton", "Grant", "Haskell", "Gray", "Ford", "Kiowa", "Pratt", "Stafford", "Morton", "Stevens", "Seward", "Meade", "Clark", "Comanche", "Barber"))) %>% 
+  st_area() %>% 
+  sum() %>% 
+  as.numeric()
+area_outside_range <- area_outside_range*0.00024710538150000001 #converts to acres
+
+# second: enrollment within these counties
+lpc_counties <- c("SHERMAN", "THOMAS", "SHERIDAN", "GRAHAM", "ROOKS", "WALLACE", "LOGAN", "GOVE", "TREGO", "ELLIS", "GREELEY", "WICHITA", "SCOTT", "LANE", "NESS", "RUSH", "HAMILTON", "KEARNEY", "FINNEY", "HODGEMAN", "PAWNEE", "EDWARDS", "STANTON", "GRANT", "HASKELL", "GRAY", "FORD", "KIOWA", "PRATT", "STAFFORD", "MORTON", "STEVENS", "SEWARD", "MEADE", "CLARK", "COMANCHE", "BARBER")
+
+counties <- read_csv(here("changes_in_crp", "CRP_county_readable.csv")) %>% 
+  filter(STATE == "KANSAS") %>% 
+  pivot_longer(`1986`:`2022`)
+
+enrollment_range <- tibble(year = 1985:2022)
+
+# Acreage within range
+enrollment_range$within <- map(1985:2022, function(x){
+  if(x == 1985) {
+    return(0)
+  }
+  else{
+    counties %>% 
+      filter(name == x) %>% 
+      filter(COUNTY %in% lpc_counties) %>% 
+      pull(value) %>% 
+      sum(.)/area_within_range %>% 
+      return()
+  }
+})
+
+# Acreage outside range
+enrollment_range$outside <- map(1985:2022, function(x){
+  if(x == 1985) {
+    return(0)
+  }
+  else{
+    counties %>% 
+      filter(name == x) %>% 
+      filter(!(COUNTY %in% lpc_counties)) %>% 
+      pull(value) %>% 
+      sum(.)/area_outside_range %>% 
+      return()
+  }
+})
+
+```
+
+# Estimated CRP within LPC range in KS
+
+Read in EOR shapefile (needs to be a range map with consistent data availability back to 2007) and KS shapefile
+```{r}
+kansas <- states(cb = TRUE) %>% 
+  filter(NAME == "Kansas") %>% 
+  st_transform(5070)
+
+eor_2011 <- st_read(here("range", "sgpchat_lepc_estimated_occupied_range_110813.shp")) %>% 
+  st_transform(st_crs(kansas)) %>% 
+  st_intersection(kansas)
+
+noneor_2011 <- st_sym_difference(kansas, summarise(eor_2011))
+```
+
+Calculating estimated CRP cover in any given year
+```{r}
+est_crp <- tibble(year = 1985:2023)
+
+est_crp$within <- map_dbl(list.files(here("covariates", "crp", "est_crp")), function(x){
+  q <- freq(rast(here("covariates", "crp", "est_crp", x)), value = 2, zones = vect(summarise(eor_2011))) %>% 
+    mutate(area = count*30*30) #converting to sq m
+  return(q$area[[1]])
+}, .progress = TRUE)
+
+est_crp$outside <- map_dbl(list.files(here("covariates", "crp", "est_crp")), function(x){
+  q <- freq(rast(here("covariates", "crp", "est_crp", x)), value = 2, zones = vect(summarise(noneor_2011))) %>% 
+    mutate(area = count*30*30) #converting to sq m
+  return(q$area[[1]])
+}, .progress = TRUE)
+```
+
+# Plotting
+```{r fig.height=6.666667, fig.width=4}
+enrollment_within_range <- enrollment_range %>% 
+  pivot_longer(`within`:`outside`) %>% 
+  mutate(value = as.numeric(value),
+         year = mdy(paste0("1/1/", year))) %>% 
+  ggplot(aes(x = year, y = value, group = name, color = name)) +
+  geom_line(size = 1.2) +
+  labs(x = "Year", y = "Proportion of landscape in CRP") + 
+  annotate("text", x = mdy("1/1/2029"), y = .061, label = "Within range", color = "darkblue", size = 3.5) +
+  annotate("text", x = mdy("6/1/2029"), y = .017, label = "Outside range", color = "darkred", size = 3.5) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.02), labels = scales::percent, limits = c(0, 0.12)) +
+  scale_color_manual(values = c("darkred", "darkblue")) +
+  theme_bw() +
+  ggtitle("(A) Enrolled CRP") + 
+  theme(plot.title = element_text(face = "bold")) + 
+  guides(color = "none") +
+  scale_x_date(breaks = mdy(paste0("1/1/", seq(1985, 2025, 5))),
+               limits = c(mdy("1/1/1985"), mdy("1/1/2036")),
+  date_labels = "'%y")
+
+estimated_enrollment <- est_crp %>% 
+  mutate(within_pct = as.numeric(within/sum(st_area(eor_2011))),
+         outside_pct = as.numeric(outside/sum(st_area(noneor_2011))),
+         year = mdy(paste0("1/1/", year))) %>% 
+  pivot_longer(`within_pct`:`outside_pct`) %>% 
+  ggplot(aes(x = year, y = value, group = name, color = name)) +
+  geom_line(size = 1.2) +
+  labs(x = "Year", y = "Proportion of landscape in CRP") + #Proportion of range enrolled in CRP
+  scale_y_continuous(breaks = seq(0, 1, by = 0.02), labels = scales::percent, limits = c(0, 0.12)) +
+  # scale_x_continuous(breaks = seq(1985, 2025, 5),
+  #                    limits = c(1985, 2036)) +
+  theme_bw() +
+  ggtitle("(B) Estimated CRP") + 
+  theme(plot.title = element_text(face = "bold")) +
+  scale_color_manual(values = c("darkred", "darkblue")) +
+  annotate("text", x = mdy("1/1/2030"), y = .101, label = "Within range", color = "darkblue", size = 3.5) +
+  annotate("text", x = mdy("6/1/2030"), y = .046, label = "Outside range", color = "darkred", size = 3.5) +
+  guides(color = "none") +
+  scale_x_date(breaks = mdy(paste0("1/1/", seq(1985, 2025, 5))),
+               limits = c(mdy("1/1/1985"), mdy("1/1/2036")),
+  date_labels = "'%y")
+
+(combined_plot <- ggarrange(enrollment_within_range, estimated_enrollment,
+                           ncol = 1,
+                           nrow = 2
+                           #labels = c("A", "B", "C")
+))
+
+ggsave(plot = combined_plot, filename = here("changes_in_crp", "crp_enrollment_comparison.png"), width = 4, height = 6.666667, units = "in")
+```
+

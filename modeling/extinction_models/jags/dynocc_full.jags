@@ -1,0 +1,81 @@
+model{
+## Likelihood
+for(k in 1:n_routes){
+  for(i in 1:n_obs[k]){
+    # defining initial occupancy as a function of a route-specific psi
+    binary_real[i,first_obs[k],k] ~ dbern(psi[k])
+    
+    for(j in first_obs[k]:n_col){ #years
+      # detection model
+      binary_obs_1[i,j,k] ~ dbern(ifelse(binary_real[i,j,k] == 1, p, 0)) # if alive, then probability of detection. Else 0.
+      binary_obs_2[i,j,k] ~ dbern(ifelse(binary_real[i,j,k] == 1, p, 0)) # note multiple observations per year. Here assuming that the within-year sampling period is a closed interval.
+    }
+    
+    #fix NA values of binary_real to unavailable for purposes of summing the number of available leks per year.
+    for(j in 1:first_obs[k]){
+      available[i,j,k] <- 0
+    }
+    
+    for(j in (first_obs[k]+1):n_col){
+      # determine whether a lek is unoccupied
+      available[i,j,k] <- 1 - binary_real[i,j-1,k] # is this lek currently unoccupied? If so, consider it to be available (1)
+    
+      # dynamic occupancy model
+      binary_real[i,j,k] ~ dbern(available[i,j,k] * gamma[i,j,k] + (1 - available[i,j,k]) * phi[i,j,k]) # if formerly 0, colonization. Else, persistence
+      logit(phi[i,j,k]) <- alpha_0 + alpha_1 * crp_est[i,j,k] + alpha_2 * grass_est[i,j,k] # persistence is solely the function of CRP
+      logit(gamma[i,j,k]) <- beta_0 + beta_1 * crp_est[i,j,k] + beta_2 * grass_est[i,j,k] + beta_3 * sum(available[1:n_obs[k],j,k]) # colonization is the function of CRP and the number of leks still available to be colonized (see Kéry and Schaub 2012 for explanation why this is necessary)
+    }
+  }
+}
+
+## Priors
+# Presence on initial survey (psi as a function of route)
+for(k in 1:n_routes){
+  psi[k] ~ dunif(0, 1)
+}
+
+# Persistence
+alpha_0 ~ dnorm(0, 50^-2)
+alpha_1 ~ dnorm(0, 50^-2)
+alpha_2 ~ dnorm(0, 50^-2)
+
+# Colonization
+beta_0 ~ dnorm(0, 50^-2)
+beta_1 ~ dnorm(0, 50^-2)
+beta_2 ~ dnorm(0, 50^-2)
+beta_3 ~ dnorm(0, 50^-2)
+
+# Detection
+p ~ dunif(0,1)
+
+## Forecast
+for(k in 1:n_routes){
+  for(i in 1:n_obs[k]){
+    for(l in 1:6){
+      # specifying initial occupancy using the 2021 occupancy from the real data
+      binary_forecast[i,1,k,l] = binary_real[i,n_col,k]
+      
+      for(j in 2:16){ # forecasted years
+        # determine whether a lek is unoccupied
+        available_forecast[i,j,k,l] <- 1 - binary_forecast[i,j-1,k,l]
+        
+        # dynamic occupancy model
+        binary_forecast[i,j,k,l] ~ dbern(available_forecast[i,j,k,l] * gamma_forecast[i,j,k,l] + (1 - available_forecast[i,j,k,l]) * phi_forecast[i,j,k,l])
+        logit(phi_forecast[i,j,k,l]) <- alpha_0 + alpha_1 * crp_forecast[i,k,l] + alpha_2 * grass_est[i,n_col,k] # take the simulated crp cover, and the grass cover from 2021 (latest year)
+        logit(gamma_forecast[i,j,k,l]) <- beta_0 + beta_1 * crp_forecast[i,k,l] + beta_2 * grass_est[i,n_col,k] + beta_3 * sum(available_forecast[1:n_obs[k],j,k,l])
+      }
+    }
+  }
+}
+
+#sum total of leks per year
+for(l in 1:6){ #forecasts
+  for(j in 1:16){
+    lpy_forecast[j,l] <- sum(b_forecast[j,,l])
+    for(k in 1:n_routes){
+      b_forecast[j,k,l] <- sum(binary_forecast[1:n_obs[k],j,k,l])
+    }
+  }
+}
+
+}

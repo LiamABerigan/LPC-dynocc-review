@@ -1,0 +1,147 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(rjags)
+library(here)
+library(ggpubr)
+library(tidybayes)
+```
+
+Read in model results
+```{r}
+m_results <- readRDS(here("modeling", "extinction_models", "results", "dynocc_full.rds"))
+```
+
+Slope statistics 
+```{r}
+# persistence
+m_results$sims.list$alpha_1 %>% 
+  median_qi() # 1.772765 (-0.3276358, 3.92692)
+
+m_results$sims.list$alpha_2 %>% 
+  median_qi() # 0.3425724	(-0.4565533, 1.164238)
+
+# colonization
+m_results$sims.list$beta_1 %>% 
+  median_qi() # 2.724444 (0.6525923, 4.738626)
+
+m_results$sims.list$beta_2 %>% 
+  median_qi() # 0.9048169	(0.2735105, 1.514105)
+```
+
+Probability of superiority
+```{r}
+# persistence
+map2_dbl(m_results$sims.list$alpha_1, m_results$sims.list$alpha_2, function(x,y){
+  x > y
+}) %>% 
+  mean() # 0.8963704
+
+#colonization
+map2_dbl(m_results$sims.list$beta_1, m_results$sims.list$beta_2, function(x,y){
+  x > y
+}) %>%
+  mean() # 0.9541481
+```
+
+Magnitude of difference between the parameters
+```{r}
+# extinction
+map2_dbl(m_results$sims.list$alpha_1, m_results$sims.list$alpha_2, function(x,y){
+  x/y
+}) %>%
+  median_qi() # 2.787967 (-46.97797, 50.66441)
+
+#colonization
+map2_dbl(m_results$sims.list$beta_1, m_results$sims.list$beta_2, function(x,y){
+  x/y
+}) %>%
+  median_qi() # 3.011398 (0.6336156, 10.08317)
+```
+
+
+# Extinction plotting
+
+Prep data
+```{r}
+prediction_e <- tibble(index = 1:length(m_results$sims.list$alpha_0), alpha_0 = m_results$sims.list$alpha_0, alpha_1 = m_results$sims.list$alpha_1, alpha_2 = m_results$sims.list$alpha_2)
+
+value_key_e <- expand_grid(1:length(m_results$sims.list$alpha_0), seq(0, 0.40, 0.01))
+colnames(value_key_e) <- c("index", "cover")
+
+prediction_e <- left_join(prediction_e, value_key_e)
+
+prediction_e <- prediction_e %>% 
+  mutate(phi_crp = boot::inv.logit(alpha_0 + alpha_1 * cover + alpha_2 * 0.5175705)) %>%  #mean grassland cover
+  mutate(phi_grass = boot::inv.logit(alpha_0 + alpha_1 * 0.07669354 + alpha_2 * cover)) %>% #mean crp cover
+  pivot_longer(cols = phi_crp:phi_grass, names_to = "class", values_to = "phi") %>% 
+  mutate(class = case_match(class,
+                            "phi_crp" ~ "CRP",
+                            "phi_grass" ~ "Non-CRP Grassland"))
+```
+
+Facet plot
+```{r}
+(plot_combined_e <- prediction_e %>% 
+  ggplot(aes(x = cover, y = phi)) +
+  stat_lineribbon(.width = c(.95, .8, .5), alpha = 0.5, point_interval = median_qi) +
+  scale_fill_manual(values = rev(c("#636363", "#bdbdbd", "#f0f0f0"))) +
+  labs(y = "Annual lek persistence rate (\u03A6)", x = "Percent of landscape (%)", fill = "CRI") +
+  scale_x_continuous(labels = scales::label_percent()) +
+  coord_cartesian(ylim = c(0.5, 1)) +
+  theme_bw() +
+  facet_wrap(vars(class)) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.title.x = element_blank()) +
+  ggtitle("A"))
+```
+
+# Colonization plotting
+
+Prep data
+```{r}
+prediction_c <- tibble(index = 1:length(m_results$sims.list$beta_0), beta_0 = m_results$sims.list$beta_0, beta_1 = m_results$sims.list$beta_1, beta_2 = m_results$sims.list$beta_2, beta_3 = m_results$sims.list$beta_3)
+
+value_key_c <- expand_grid(1:length(m_results$sims.list$beta_0), seq(0, 0.40, 0.01))
+
+colnames(value_key_c) <- c("index", "cover")
+
+prediction_c <- left_join(prediction_c, value_key_c)
+
+prediction_c <- prediction_c %>% 
+  mutate(gamma_crp = boot::inv.logit(beta_0 + beta_1 * cover + beta_2 * 0.5175705 + beta_3 * 10)) %>% # mean grassland cover
+  mutate(gamma_grass = boot::inv.logit(beta_0 + beta_1 * 0.07669354 + beta_2 * cover + beta_3 * 10)) %>% # mean CRP cover
+  pivot_longer(cols = gamma_crp:gamma_grass, names_to = "class", values_to = "gamma") %>% 
+  mutate(class = case_match(class,
+                            "gamma_crp" ~ "CRP",
+                            "gamma_grass" ~ "Non-CRP Grassland"))
+```
+
+Facet plot
+```{r}
+(plot_combined_c <- prediction_c %>% 
+  ggplot(aes(x = cover, y = gamma)) +
+  stat_lineribbon(.width = c(.95, .8, .5), alpha = 0.5, point_interval = median_qi) +
+  scale_fill_manual(values = rev(c("#636363", "#bdbdbd", "#f0f0f0"))) +
+  labs(y = "Annual colonization rate (\u03B3)", x = "Percent of landscape (%)", fill = "CRI") +
+  scale_x_continuous(labels = scales::label_percent()) +
+  coord_cartesian(ylim = c(0, 0.08)) +
+  theme_bw() +
+  facet_wrap(vars(class)) +
+  ggtitle("B") +
+  theme(plot.title = element_text(face = "bold")))
+```
+
+# Combined plot
+```{r}
+ggarrange(plot_combined_e, plot_combined_c, nrow = 2, common.legend = TRUE, legend = "right", heights = c(0.475, 0.525)) +
+  bgcolor("white") +
+  border("white")
+
+ggsave(here("modeling", "extinction_models", "statistics", "parameters_combined.png"), width = 8/1.2, height = 6/1.2, units = "in", dpi = 600)
+```
+

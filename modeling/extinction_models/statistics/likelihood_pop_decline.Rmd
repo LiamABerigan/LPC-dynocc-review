@@ -1,0 +1,79 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidybayes)
+library(rjags)
+library(here)
+```
+
+Read in model results
+```{r}
+m_results <- readRDS(here("modeling", "extinction_models", "results", "dynocc_full.rds"))
+```
+
+Prep data 
+```{r}
+# m_results$sims.list$lpy_forecast[,,1] %>% View()
+# dim(m_results$sims.list$lpy_forecast)
+# m_results$sims.list$lpy_forecast
+
+forecasts <- map(1:6, function(x){
+  y <- m_results$sims.list$lpy_forecast[,,x]
+  colnames(y) <- 1:16
+  z <- y %>% 
+    as_tibble(.name_repair = "minimal") %>% 
+    mutate(forecast = x)
+  
+  z$chain <- 1:nrow(z)
+  
+  return(z)
+}) %>% 
+  bind_rows() %>% 
+  # pivot_longer(cols = as.character(1:39),
+  #              names_to = "year",
+  #              values_to = "lek_count") %>% 
+  mutate(forecast = factor(forecast, levels = 1:6, labels = c("No change", "20% decline", "50% decline", "20% increase", "50% increase", "No CRP")))
+```
+
+
+Likelihood of any decline within 5 years
+```{r}
+forecasts %>% 
+  mutate(loss_within_5 = `6`/`1`) %>% 
+  mutate(decline_binary = as.numeric(loss_within_5 < 1)) %>% 
+  group_by(forecast) %>% 
+  summarise(mean(decline_binary)*100)
+```
+
+Likelihood of a 10% decline within 5 years
+```{r}
+forecasts %>% 
+  mutate(loss_within_5 = `6`/`1`) %>% 
+  mutate(loss_10_within_5 = as.numeric(loss_within_5 < 0.9)) %>% 
+  group_by(forecast) %>% 
+  summarise(mean(loss_10_within_5)*100)
+```
+
+Likelihood of a 20% decline within 5 years
+```{r}
+forecasts %>% 
+  mutate(loss_within_5 = `6`/`1`) %>% 
+  mutate(loss_20_within_5 = as.numeric(loss_within_5 < 0.8)) %>% 
+  group_by(forecast) %>% 
+  summarise(mean(loss_20_within_5)*100)
+```
+
+Likelihood of a 30% decline within 5 years
+```{r}
+forecasts %>% 
+  mutate(loss_within_5 = `6`/`1`) %>% 
+  mutate(loss_30_within_5 = as.numeric(loss_within_5 < 0.7)) %>% 
+  group_by(forecast) %>% 
+  summarise(mean(loss_30_within_5)*100)
+```
+
+

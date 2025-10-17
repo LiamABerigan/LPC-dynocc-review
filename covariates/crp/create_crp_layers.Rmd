@@ -1,0 +1,65 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(terra)
+library(sf)
+library(stars)
+library(here)
+#library(mapview)
+```
+
+Load rasters
+```{r}
+file_names <- list.files(here("covariates", "landcover_datasets", "nlcd_tifs", "cropped"))
+
+rasters <- map(file_names, function(x){
+  rast(here("covariates", "landcover_datasets", "nlcd_tifs", "cropped", x))
+})
+```
+
+1985
+```{r}
+rast_1985 <- rasters[[1]]
+classification_df <- unique(rast_1985)
+colnames(classification_df) <- "combo_class"
+classification_df$new_class <- map_dbl(classification_df$combo_class, function(x){
+  case_match(x, 
+             82 ~ 2, #cropland
+             .default = 1 #everything else
+  )
+})
+
+comparison_raster <- subst(rast_1985, from = classification_df$combo_class, to = classification_df$new_class)
+```
+
+Looping from 1985 to 2023
+```{r}
+for(i in 1:39){ #
+  file_name <- file_names[i]
+  year <- file_name %>% 
+    str_sub(20, 23) %>% 
+    as.numeric()
+  
+  combo_raster <- comparison_raster*100 + rasters[[i]] #hundreds place is the former, tens and ones place is the current
+  
+  classification_df <- unique(combo_raster)
+  colnames(classification_df) <- "combo_class"
+  
+  classification_df$new_class <- map_dbl(classification_df$combo_class, function(x){
+    case_when(
+      x == 271 ~ 2, #formerly cropland, now grassland (CRP; 2)
+      x %% 100 == 71 ~ 1, #any other type of grassland (non-CRP grassland; 1)
+      .default = 0 #else 0
+    )
+  })
+  
+  new_raster <- subst(combo_raster, from = classification_df$combo_class, to = classification_df$new_class)
+  
+  writeRaster(new_raster, filename = here("covariates", "crp", "est_crp", paste0("crp_", year,".tif")))
+}
+```
+

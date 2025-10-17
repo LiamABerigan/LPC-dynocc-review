@@ -1,0 +1,61 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(rjags)
+library(here)
+library(ggpubr)
+library(tidybayes)
+```
+
+Read in model results
+```{r}
+m_results <- readRDS(here("modeling", "extinction_models", "results", "dynocc_full.rds"))
+```
+
+```{r}
+posterior_tbl_phi <- bind_rows(tibble(model = "CRP", draws = m_results$sims.list$alpha_1),
+          tibble(model = "Non-CRP Grass", draws = m_results$sims.list$alpha_2))
+
+(phi_plot <- posterior_tbl_phi %>% 
+  ggplot(aes(x = model, y = draws)) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  stat_eye(.width = c(.95, .5), alpha = 0.8, point_interval = median_qi) +
+  theme_bw() +
+  labs(title = expression(paste("Persistence rate (", phi, ")")),
+       x = "Covariate", 
+       y = "Effect size"
+       #y =  expression(paste("Posterior distribution of ", beta[paste("1,", phi, ",c")]))
+       ) +
+    scale_y_continuous(limits = c(-2.5, 7.5))
+  )
+```
+
+```{r}
+posterior_tbl_gamma <- bind_rows(tibble(model = "CRP", draws = m_results$sims.list$beta_1),
+                               tibble(model = "Non-CRP Grass", draws = m_results$sims.list$beta_2))
+
+(gamma_plot <- posterior_tbl_gamma %>% 
+  ggplot(aes(x = model, y = draws)) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  stat_eye(.width = c(.95, .5), alpha = 0.8, point_interval = median_qi) +
+  theme_bw() +
+  labs(title = expression(paste("Colonization rate (", gamma, ")")),
+       x = "Covariate", 
+       y = ""
+       #y =  expression(paste("Posterior distribution of ", beta[paste("1,", phi, ",c")]))
+       ) +
+    scale_y_continuous(limits = c(-2.5, 7.5))
+)
+```
+
+
+```{r fig.height=3, fig.width=5}
+ggarrange(phi_plot, gamma_plot, ncol = 2, nrow = 1)
+
+ggsave(here("modeling", "extinction_models", "statistics", "posterior_distributions.png"), width = 5, height = 3, units = "in", dpi = 600)
+```
+
